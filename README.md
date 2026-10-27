@@ -1,8 +1,8 @@
 # MeTime - Salon Booking App
+
 > **Repository note:** This repository was created as a fresh copy of the project. The original repository was made private for security reasons (to keep Firebase / API configuration out of a shareable codebase), and this repo was set up afterwards so the project can be shared safely. For that reason the previous commit history is not included here.
 >
 > **Repo notu:** Bu repo projenin temiz bir kopyası olarak sonradan oluşturuldu. Eski repo güvenlik ve paylaşılabilirlik nedeniyle private'a alındı; bu yüzden eski commit geçmişi burada yer almıyor.
-
 
 A Flutter-based salon appointment booking application designed from Figma prototypes. Users can browse services, choose professionals, book appointments, and manage their bookings.
 
