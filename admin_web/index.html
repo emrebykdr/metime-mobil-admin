@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MeTime Admin</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <div id="sidebar-slot"></div>
+
+    <div class="main">
+      <div id="topbar-slot"></div>
+
+      <main class="content">
+        <h1 class="page-title">Dashboard</h1>
+
+        <div id="pending-alert" class="alert-banner">
+          <span id="pending-alert-text">Yükleniyor...</span>
+          <a class="secondary-btn" href="randevular.html">Onay Kuyruğuna Git</a>
+        </div>
+
+        <h2 class="section-title">Randevu Özeti</h2>
+        <section class="overview">
+          <div class="stat-card">
+            <span class="stat-label">Bugün</span>
+            <span class="stat-value" id="today-count">-</span>
+            <span class="stat-sub">Doluluk: <strong id="today-occupancy">-</strong>%</span>
+            <span class="stat-sub">Ciro (tahmini): <strong id="today-revenue">-</strong></span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-label">Bu Hafta</span>
+            <span class="stat-value" id="week-count">-</span>
+            <span class="stat-sub">Doluluk: <strong id="week-occupancy">-</strong>%</span>
+            <span class="stat-sub">Ciro (tahmini): <strong id="week-revenue">-</strong></span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-label">Bu Ay</span>
+            <span class="stat-value" id="month-count">-</span>
+            <span class="stat-sub">Doluluk: <strong id="month-occupancy">-</strong>%</span>
+            <span class="stat-sub">Ciro (tahmini): <strong id="month-revenue">-</strong></span>
+          </div>
+        </section>
+
+        <h2 class="section-title">En Çok Tercih Edilenler</h2>
+        <section class="overview two-col">
+          <div class="card">
+            <div class="card-header">
+              <h2>Popüler Hizmetler</h2>
+            </div>
+            <ol class="top-list" id="top-services"></ol>
+          </div>
+          <div class="card">
+            <div class="card-header">
+              <h2>Popüler Uzmanlar</h2>
+            </div>
+            <ol class="top-list" id="top-professionals"></ol>
+          </div>
+        </section>
+
+        <h2 class="section-title">Genel</h2>
+        <section class="overview">
+          <div class="stat-card">
+            <span class="stat-label">Kayıtlı Kullanıcı</span>
+            <span class="stat-value" id="stat-users">-</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-label">Toplam Randevu</span>
+            <span class="stat-value" id="stat-total-bookings">-</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-label">Kayıtlı Uzman</span>
+            <span class="stat-value" id="stat-professionals">-</span>
+          </div>
+        </section>
+
+        <h2 class="section-title">Şubeler</h2>
+        <section class="overview" id="salon-stats-grid">
+          <!-- app.js tarafından, her şube için bir kart olacak şekilde doldurulur -->
+        </section>
+
+        <h2 class="section-title">Kullanıcı Girişi</h2>
+        <section class="card">
+          <div class="card-header">
+            <h2>Master Giriş Kodu</h2>
+          </div>
+          <p class="status">Bu kod herhangi bir hesabın giriş kodu ekranında kullanılabilir (10 dk geçerli, süresi dolunca otomatik yenilenir).</p>
+          <div class="booking-form">
+            <div class="field-row">
+              <input type="text" id="login-code-result" disabled />
+              <span id="login-code-timer" class="code-timer"></span>
+            </div>
+            <p id="login-code-status" class="status"></p>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <script type="module" src="app.js?v=13"></script>
+</body>
+</html>

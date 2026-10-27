@@ -1,0 +1,441 @@
+import 'dart:async';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_svg/flutter_svg.dart';
+import 'package:figmaap/core(gerekli)/color.dart';
+import 'package:figmaap/core(gerekli)/responsive.dart';
+import 'package:figmaap/widgets/app_header.dart';
+import 'package:figmaap/pages/professionals_calendar.dart';
+import 'package:figmaap/pages/proffessionals_no_preference.dart';
+import 'package:figmaap/pages/main_page.dart';
+import 'package:figmaap/services/user_service.dart';
+import 'package:figmaap/services/email_service.dart';
+
+class LoginPhoneCode extends StatefulWidget {
+  final String phoneNumber;
+  final Map<String, dynamic>? professional;
+  final bool noPreference;
+  // Kod doğrulandıktan sonra doğrudan MainPage'e gidilsin mi (booking akışı
+  // seçimini atla). Hem yeni kayıt olan (sign_up.dart) hem de "Skip" ile
+  // gelen kullanıcılar için true olur; her ikisi de kendi email'ine
+  // gönderilen gerçek kodu girer, sadece varış sayfası değişir.
+  final bool skipToMain;
+  final String selectedService;
+  final String selectedPrice;
+
+  const LoginPhoneCode({
+    super.key,
+    required this.phoneNumber,
+    this.professional,
+    this.noPreference = false,
+    this.skipToMain = false,
+    this.selectedService = 'Basic Manicure',
+    this.selectedPrice = '\$30',
+  });
+
+  @override
+  State<LoginPhoneCode> createState() => _LoginPhoneCodeState();
+}
+
+class _LoginPhoneCodeState extends State<LoginPhoneCode> {
+  final List<TextEditingController> _controllers = List.generate(
+    5,
+    (_) => TextEditingController(),
+  );
+  final List<FocusNode> _focusNodes = List.generate(5, (_) => FocusNode());
+
+  static const int _resendCooldownSeconds = 3 * 60;
+
+  late Timer _timer;
+  int _remainingSeconds = _resendCooldownSeconds;
+  bool _isResending = false;
+
+  String? _expectedCode;
+  int? _expectedCodeExpiresAt;
+  String? _userId;
+  String? _userEmail;
+  String? _userFullName;
+  String? _errorText;
+  StreamSubscription<Map<String, dynamic>?>? _userSub;
+
+  String? _masterCode;
+  int? _masterCodeExpiresAt;
+  StreamSubscription<Map<String, dynamic>?>? _masterCodeSub;
+
+  @override
+  void initState() {
+    super.initState();
+    _startTimer();
+    _listenForExpectedCode();
+    _listenForMasterCode();
+  }
+
+  // login_phone.dart'ta email girilince otomatik üretilen kişisel kod
+  // kullanıcının email adresine gönderiliyor. Tek seferlik sorgu yerine
+  // canlı dinleniyor: örneğin "Send code again" ile yeni bir kod üretilirse,
+  // ekran yeniden açılmadan _expectedCode anında güncellenir.
+  void _listenForExpectedCode() {
+    _userSub = UserService().watchUserByPhone(widget.phoneNumber).listen((
+      userData,
+    ) {
+      if (!mounted) return;
+      setState(() {
+        _expectedCode = userData?['loginCode'] as String?;
+        _expectedCodeExpiresAt = userData?['loginCodeExpiresAt'] as int?;
+        _userId = userData?['id'] as String?;
+        _userEmail = userData?['email'] as String?;
+        _userFullName = userData?['fullName'] as String?;
+      });
+    });
+  }
+
+  // Dashboard'dan (kullanıcı seçilmeden) üretilen evrensel master kod: hangi
+  // hesap olursa olsun, bu kod da kişisel loginCode kadar geçerli kabul
+  // edilir (bkz. UserService.watchMasterCode).
+  void _listenForMasterCode() {
+    _masterCodeSub = UserService().watchMasterCode().listen((data) {
+      if (!mounted) return;
+      setState(() {
+        _masterCode = data?['code'] as String?;
+        _masterCodeExpiresAt = data?['expiresAt'] as int?;
+      });
+    });
+  }
+
+  void _startTimer() {
+    _remainingSeconds = _resendCooldownSeconds;
+    _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (_remainingSeconds > 0) {
+        setState(() {
+          _remainingSeconds--;
+        });
+      } else {
+        _timer.cancel();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer.cancel();
+    _userSub?.cancel();
+    _masterCodeSub?.cancel();
+    for (final c in _controllers) {
+      c.dispose();
+    }
+    for (final f in _focusNodes) {
+      f.dispose();
+    }
+    super.dispose();
+  }
+
+  String get _formattedTime {
+    final minutes = (_remainingSeconds ~/ 60).toString().padLeft(2, '0');
+    final seconds = (_remainingSeconds % 60).toString().padLeft(2, '0');
+    return '$minutes:$seconds';
+  }
+
+  void _onCodeChanged(String value, int index) {
+    if (value.length == 1 && index < 4) {
+      _focusNodes[index + 1].requestFocus();
+    }
+    if (value.isEmpty && index > 0) {
+      _focusNodes[index - 1].requestFocus();
+    }
+    _checkCode();
+  }
+
+  // Dashboard'dan üretilen evrensel master kod, süresi dolmadığı sürece
+  // hangi hesap olursa olsun kişisel kod yerine geçer.
+  bool get _isMasterCodeValid {
+    final expiresAt = _masterCodeExpiresAt;
+    if (_masterCode == null || expiresAt == null) return false;
+    return DateTime.now().millisecondsSinceEpoch <= expiresAt;
+  }
+
+  void _checkCode() async {
+    final code = _controllers.map((c) => c.text).join();
+    if (code.length != 5) return;
+
+    final masterValid = code == _masterCode && _isMasterCodeValid;
+    final now = DateTime.now().millisecondsSinceEpoch;
+
+    final codeMatches = _expectedCode != null && code == _expectedCode;
+    if (!masterValid && !codeMatches) {
+      setState(() {
+        _errorText = 'Invalid code';
+      });
+      return;
+    }
+
+    // Kod eşleşse bile süresi (10 dk, loginCodeExpiresAt) dolmuşsa kabul
+    // edilmez — admin panelinin açık olması (ve otomatik yenileme
+    // sayacının çalışması) garanti olmadığı için bu kontrol istemci
+    // tarafında da ayrıca yapılıyor, yalnızca panele güvenilmiyor. Master
+    // kod zaten geçerliyse (masterValid) bu ek kontrole gerek yok.
+    final expiresAt = _expectedCodeExpiresAt;
+    final isExpired = !masterValid && expiresAt != null && now > expiresAt;
+    if (isExpired) {
+      setState(() {
+        _errorText = 'This code has expired. Please request a new one.';
+      });
+      return;
+    }
+
+    setState(() {
+      _errorText = null;
+    });
+
+    await UserService().loginUser(phone: widget.phoneNumber);
+    if (!mounted) return;
+    if (widget.skipToMain) {
+      Navigator.pushAndRemoveUntil(
+        context,
+        MaterialPageRoute(builder: (_) => const MainPage()),
+        (route) => false,
+      );
+    } else if (widget.noPreference) {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (_) => NoPreference(
+            selectedService: widget.selectedService,
+            selectedPrice: widget.selectedPrice,
+          ),
+        ),
+      );
+    } else {
+      final pro = widget.professional;
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (_) => ProfessionalsCalendar(
+            name: pro?['name'] as String? ?? 'Anna Smith',
+            role: pro?['role'] as String? ?? 'Nail Designer',
+            rating: (pro?['rating'] as num?)?.toDouble() ?? 5.0,
+            imagePath: pro?['photoUrl'] as String? ?? '',
+            selectedService: widget.selectedService,
+            selectedPrice: widget.selectedPrice,
+            workingHours: pro?['workingHours'] as Map<String, dynamic>? ?? {},
+            daysOff: (pro?['daysOff'] as List?)?.cast<String>() ?? [],
+          ),
+        ),
+      );
+    }
+  }
+
+  // "Send code again": yeni bir kod üretip yeniden EmailJS ile gönderir;
+  // daha önce sadece görsel sayacı sıfırlayıp hiçbir şey göndermiyordu.
+  Future<void> _onResendTap() async {
+    if (_remainingSeconds != 0 || _isResending) return;
+
+    if (_userId == null || _userEmail == null) {
+      _startTimer();
+      setState(() {});
+      return;
+    }
+
+    setState(() {
+      _isResending = true;
+      _errorText = null;
+    });
+
+    final code = await UserService().issueLoginCode(_userId!);
+    final sent = await EmailService().sendLoginCode(
+      toEmail: _userEmail!,
+      toName: _userFullName ?? '',
+      code: code,
+    );
+    if (!mounted) return;
+
+    setState(() {
+      _isResending = false;
+      _errorText = sent
+          ? null
+          : "We couldn't resend the code. Please try again.";
+    });
+    _startTimer();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final r = Responsive(context);
+
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      body: SafeArea(
+        child: Padding(
+          padding: EdgeInsets.symmetric(horizontal: r.w(30)),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SizedBox(height: r.h(16)),
+              _buildTopBar(context, r),
+              SizedBox(height: r.h(74)),
+              _buildTitle(r),
+              SizedBox(height: r.h(10)),
+              _buildSubtitle(r),
+              SizedBox(height: r.h(32)),
+              _buildCodeFields(r),
+              if (_errorText != null) ...[
+                SizedBox(height: r.h(8)),
+                Text(
+                  _errorText!,
+                  style: TextStyle(
+                    fontFamily: 'Raleway',
+                    fontWeight: FontWeight.w500,
+                    fontSize: r.sp(13),
+                    color: AppColors.cancel,
+                  ),
+                ),
+              ],
+              const Spacer(),
+              _buildResendRow(r),
+              SizedBox(height: r.h(40)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTopBar(BuildContext context, Responsive r) {
+    return Stack(
+      alignment: Alignment.center,
+      children: [
+        Align(
+          alignment: Alignment.centerLeft,
+          child: GestureDetector(
+            onTap: () => Navigator.pop(context),
+            child: SvgPicture.asset(
+              'assets/icons/arrow_back.svg',
+              width: r.w(24),
+              height: r.w(24),
+            ),
+          ),
+        ),
+        const AppHeader(),
+      ],
+    );
+  }
+
+  Widget _buildTitle(Responsive r) {
+    return Text(
+      'Enter code',
+      style: TextStyle(
+        fontFamily: 'Raleway',
+        fontWeight: FontWeight.w700,
+        fontSize: r.sp(32),
+        height: 1.3,
+        letterSpacing: -0.32,
+        color: AppColors.almostBlack,
+      ),
+    );
+  }
+
+  Widget _buildSubtitle(Responsive r) {
+    return RichText(
+      text: TextSpan(
+        style: TextStyle(
+          fontFamily: 'Raleway',
+          fontWeight: FontWeight.w500,
+          fontSize: r.sp(16),
+          height: 1.25,
+          color: AppColors.tertiary,
+        ),
+        children: [
+          const TextSpan(text: "We've sent your login code by email to\n"),
+          TextSpan(
+            text: _userEmail ?? 'your registered email',
+            style: const TextStyle(
+              fontWeight: FontWeight.w500,
+              color: AppColors.almostBlack,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCodeFields(Responsive r) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.start,
+      children: List.generate(5, (index) {
+        return Container(
+          width: r.w(57),
+          height: r.w(65),
+          margin: EdgeInsets.only(right: index < 4 ? r.w(7) : 0),
+          child: TextField(
+            controller: _controllers[index],
+            focusNode: _focusNodes[index],
+            keyboardType: TextInputType.number,
+            textAlign: TextAlign.center,
+            maxLength: 1,
+            onChanged: (value) => _onCodeChanged(value, index),
+            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+            style: TextStyle(
+              fontFamily: 'Raleway',
+              fontWeight: FontWeight.w700,
+              fontSize: r.sp(24),
+              color: AppColors.almostBlack,
+            ),
+            decoration: InputDecoration(
+              counterText: '',
+              contentPadding: EdgeInsets.symmetric(vertical: r.h(12)),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(r.r(8)),
+                borderSide: BorderSide(
+                  color: AppColors.tertiary.withValues(alpha: 0.3),
+                  width: 1,
+                ),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(r.r(8)),
+                borderSide: const BorderSide(
+                  color: AppColors.primary,
+                  width: 1.5,
+                ),
+              ),
+            ),
+          ),
+        );
+      }),
+    );
+  }
+
+  Widget _buildResendRow(Responsive r) {
+    return Center(
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          GestureDetector(
+            onTap: _remainingSeconds == 0 && !_isResending
+                ? _onResendTap
+                : null,
+            child: Text(
+              _isResending ? 'Sending...' : 'Send code again',
+              style: TextStyle(
+                fontFamily: 'Raleway',
+                fontWeight: FontWeight.w600,
+                fontSize: r.sp(16),
+                height: 1.25,
+                color: AppColors.tertiary,
+              ),
+            ),
+          ),
+          SizedBox(width: r.w(12)),
+          Text(
+            _formattedTime,
+            style: TextStyle(
+              fontFamily: 'Raleway',
+              fontWeight: FontWeight.w600,
+              fontSize: r.sp(16),
+              height: 1.25,
+              color: AppColors.almostBlack,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
